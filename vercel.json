@@ -1,0 +1,10 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "prisma migrate deploy && next build",
+  "installCommand": "npm install",
+  "functions": {
+    "app/api/lp/[id]/analyze/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}
