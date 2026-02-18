@@ -1,0 +1,56 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  name         String?
+  password     String
+  plan         String        @default("free") // free | starter | pro
+  landingPages LandingPage[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model LandingPage {
+  id        String       @id @default(cuid())
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  url       String
+  name      String?
+  snapshots LPSnapshot[]
+  cvrData   CVRData[]
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+model LPSnapshot {
+  id              String      @id @default(cuid())
+  landingPageId   String
+  landingPage     LandingPage @relation(fields: [landingPageId], references: [id], onDelete: Cascade)
+  screenshotPath  String?
+  analysisResult  String? // JSON string
+  version         Int         @default(1)
+  status          String      @default("pending") // pending | analyzing | done | error
+  errorMessage    String?
+  createdAt       DateTime    @default(now())
+}
+
+model CVRData {
+  id            String      @id @default(cuid())
+  landingPageId String
+  landingPage   LandingPage @relation(fields: [landingPageId], references: [id], onDelete: Cascade)
+  date          DateTime
+  cvr           Float
+  source        String      @default("manual") // manual | ga4
+  sessions      Int?
+  conversions   Int?
+  note          String?
+  createdAt     DateTime    @default(now())
+}
