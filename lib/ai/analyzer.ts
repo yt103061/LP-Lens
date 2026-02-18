@@ -1,9 +1,7 @@
-import Anthropic from '@anthropic-ai/sdk'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 import fs from 'fs'
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-})
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 
 export interface SectionType {
   type: 'hero' | 'problem' | 'solution' | 'features' | 'social_proof' | 'pricing' | 'faq' | 'cta' | 'other'
@@ -43,7 +41,7 @@ const ANALYSIS_PROMPT = `あなたはランディングページ（LP）の構�
 2. informationDesign: ファーストビューの内容、CTA数と配置、テキストとビジュアルのバランス
 3. designTone: 配色、フォントスタイル、余白レベル、全体印象とスコア（0-100）
 
-必ず以下の形式のJSONのみで返答してください。説明文やマークダウンは含めないでください：
+必ず以下の形式のJSONのみで返答してください。説明文やマークダウンのコードブロック（\`\`\`json等）は含めないでください：
 
 {
   "sections": [
@@ -99,7 +97,7 @@ const TEXT_ANALYSIS_PROMPT = `あなたはランディングページ（LP）の
 注意: スクリーンショットが取得できなかったため、メタデータから推定分析を行います。
 分析の確信度は低くなりますが、可能な範囲で詳細な分析を行ってください。
 
-必ず以下の形式のJSONのみで返答してください：
+必ず以下の形式のJSONのみで返答してください。マークダウンのコードブロックは含めないでください：
 
 {
   "sections": [
@@ -131,6 +129,21 @@ const TEXT_ANALYSIS_PROMPT = `あなたはランディングページ（LP）の
   "summary": "スクリーンショットの取得に失敗したため、メタデータからの推定分析です。URLを再分析することで詳細な結果が得られます。"
 }`
 
+function extractJSON(text: string): AnalysisResult {
+  // Remove markdown code blocks if Gemini wraps the response
+  const cleaned = text
+    .replace(/```json\s*/gi, '')
+    .replace(/```\s*/g, '')
+    .trim()
+
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) {
+    throw new Error('Geminiのレスポンスにで JSON が見つかりません')
+  }
+
+  return JSON.parse(jsonMatch[0]) as AnalysisResult
+}
+
 export async function analyzeLPWithScreenshot(
   screenshotPath: string
 ): Promise<AnalysisResult> {
@@ -141,42 +154,19 @@ export async function analyzeLPWithScreenshot(
   const imageData = fs.readFileSync(absolutePath)
   const base64Image = imageData.toString('base64')
 
-  const message = await client.messages.create({
-    model: 'claude-opus-4-5',
-    max_tokens: 4096,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: {
-              type: 'base64',
-              media_type: 'image/png',
-              data: base64Image,
-            },
-          },
-          {
-            type: 'text',
-            text: ANALYSIS_PROMPT,
-          },
-        ],
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' })
+
+  const result = await model.generateContent([
+    {
+      inlineData: {
+        data: base64Image,
+        mimeType: 'image/png',
       },
-    ],
-  })
+    },
+    ANALYSIS_PROMPT,
+  ])
 
-  const content = message.content[0]
-  if (content.type !== 'text') {
-    throw new Error('Unexpected response type from Claude')
-  }
-
-  // Extract JSON from response (Claude might wrap it)
-  const jsonMatch = content.text.match(/\{[\s\S]*\}/)
-  if (!jsonMatch) {
-    throw new Error('No JSON found in Claude response')
-  }
-
-  return JSON.parse(jsonMatch[0]) as AnalysisResult
+  return extractJSON(result.response.text())
 }
 
 export async function analyzeLPFromMetadata(
@@ -184,32 +174,11 @@ export async function analyzeLPFromMetadata(
   title: string,
   description: string
 ): Promise<AnalysisResult> {
-  const message = await client.messages.create({
-    model: 'claude-opus-4-5',
-    max_tokens: 2048,
-    messages: [
-      {
-        role: 'user',
-        content: `${TEXT_ANALYSIS_PROMPT}
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
 
-URL: ${url}
-タイトル: ${title}
-説明: ${description}
+  const result = await model.generateContent(
+    `${TEXT_ANALYSIS_PROMPT}\n\nURL: ${url}\nタイトル: ${title}\n説明: ${description}\n\nこのLPを分析してください。`
+  )
 
-このLPを分析してください。`,
-      },
-    ],
-  })
-
-  const content = message.content[0]
-  if (content.type !== 'text') {
-    throw new Error('Unexpected response type from Claude')
-  }
-
-  const jsonMatch = content.text.match(/\{[\s\S]*\}/)
-  if (!jsonMatch) {
-    throw new Error('No JSON found in Claude response')
-  }
-
-  return JSON.parse(jsonMatch[0]) as AnalysisResult
+  return extractJSON(result.response.text())
 }
